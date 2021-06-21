@@ -38,6 +38,7 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
     'sphinx.ext.githubpages',
+    'qcodes.sphinx_extensions.add_parameter',
 ]
 
 # include special __xxx__ that DO have a docstring
