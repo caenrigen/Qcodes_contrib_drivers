@@ -10,6 +10,7 @@ For official instrument support visit:
 NB this driver adds parameters using the new `@add_paramter` decorator-style.
 See QCoDeS docs on writing drivers for more details.
 """
+# pylint: disable=dangerous-default-value
 from __future__ import annotations
 
 from typing import Union
@@ -17,9 +18,22 @@ import time
 import json
 from qcodes import Instrument
 from qcodes import validators
-from qcodes.instrument.base import InstanceAttr, add_parameter
-import serial  # pip install pyserial
-from serial.tools.list_ports import comports  # pip install pyserial
+
+try:
+    from qcodes.instrument.base import InstanceAttr, add_parameter
+except ImportError as e:
+    raise ImportError(
+        "This (decorator-style) driver requires qcodes version > 0.26.0."
+    ) from e
+
+try:
+    import serial
+    from serial.tools.list_ports import comports
+except ModuleNotFoundError as e:
+    raise ModuleNotFoundError(
+        "ERAInstrument drivers require the `pyserial` package to be installed.\n"
+        "Install it with `pip install pyserial` and try again."
+    ) from e
 
 import logging
 

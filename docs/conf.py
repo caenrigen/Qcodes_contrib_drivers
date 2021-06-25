@@ -38,8 +38,21 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
     'sphinx.ext.githubpages',
-    'qcodes.sphinx_extensions.add_parameter',
 ]
+
+try:
+    # pylint: disable=unused-import
+    from qcodes.sphinx_extensions import add_parameter  # noqa: F401
+    extensions.append('qcodes.sphinx_extensions.add_parameter')
+except ModuleNotFoundError:
+    import warnings
+    warnings.warn(
+        "Could not import 'qcodes.sphinx_extensions.add_parameter'\n"
+        "The documentation of decorator-style parameters will not be rendered "
+        "correctly.\n"
+        "Upgrade to latest QCoDeS to make use of this functionality.",
+        RuntimeWarning
+    )
 
 # include special __xxx__ that DO have a docstring
 # it probably means something important
