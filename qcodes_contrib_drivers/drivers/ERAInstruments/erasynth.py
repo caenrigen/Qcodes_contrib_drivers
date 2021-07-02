@@ -99,11 +99,30 @@ class ERASynthBase(Instrument):
         """
         super().__init__(name)
 
-        self.ser = serial.Serial()
-        self.ser.baudrate = baudrate
-        self.ser.port = address
-        self.ser.serial_timeout = serial_timeout
-        self.open_port()
+        # self.ser = serial.Serial(
+        #     port=address,
+        #     baudrate=baudrate,
+        #     timeout=serial_timeout
+        # )
+        # self.open_port()
+
+        # time.sleep(200e-3)
+        # self.ser.read_all()
+        # self.ser.write(">PD0\r".encode("ASCII"))
+        # time.sleep(200e-3)
+        # self.ser.write(">PDE\r".encode("ASCII"))
+        # time.sleep(200e-3)
+        # self.wifi_off()  # avoids printing debug messages that interfere with communication
+        # time.sleep(200e-3)
+
+        import pyvisa
+        rm = pyvisa.ResourceManager()
+        self.visa = rm.open_resource('ASRL/dev/cu.usbmodem14101::INSTR', baud_rate = 115200)
+
+        for cmd in [">PDE1", ">PD0", ">PE00"]:
+            self.visa.write(cmd)
+            self.visa.read()
+            self.visa.read_bytes(self.visa.bytes_in_buffer)
 
     # ##############################################################################
     # Standard LO parameters
@@ -512,14 +531,14 @@ class ERASynthBase(Instrument):
         """
         Returns the configuration JSON that contains all parameters.
         """
-        config_json = json.loads(self._get_json_str("RA", "rfoutput"))
+        config_json = self._get_json("RA")
         return config_json if par_name is None else config_json[par_name]
 
     def get_diagnostic_status(self, par_name: str = None):
         """
         Returns the diagnostic JSON.
         """
-        config_json = json.loads(self._get_json_str("RD", "temperature"))
+        config_json = self._get_json("RD")
         return config_json if par_name is None else config_json[par_name]
 
     def open_port(self):
@@ -540,27 +559,22 @@ class ERASynthBase(Instrument):
 
             After the reset the output is set to power 0.0 dBm @ 1GHz!
         """
-        self._clear_read_buffer()
         self._write_cmd("PP")
 
     def factory_reset(self):
         """Does factory reset on the device."""
-        self._clear_read_buffer()
         self._write_cmd("PR")
 
     def esp8266_upload_mode(self):
         """Sets the ESP8266 module in upload mode."""
-        self._clear_read_buffer()
         self._write_cmd("U")
 
     def wifi_on(self):
         """Turn ESP8266 WiFi module on."""
-        self._clear_read_buffer()
         self._write_cmd("PE01")
 
     def wifi_off(self):
         """Turn ESP8266 WiFi module off."""
-        self._clear_read_buffer()
         self._write_cmd("PE00")
 
     def run_self_test(self):
@@ -591,51 +605,62 @@ class ERASynthBase(Instrument):
     # ##################################################################################
 
     def _write_cmd(self, cmd: str):
-        self.ser.write(f">{cmd}\r".encode("ASCII"))
+        # self.ser.read(self.ser.in_waiting) # clear buffer
+        # self.ser.write(f">{cmd}\r".encode("ASCII"))
+        # read_str = ""
+        # while cmd not in read_str:
+        #     time.sleep(10e-3)
+        #     read_str += self.ser.read(self.ser.in_waiting).decode("ASCII")
+        # return read_str
+        self.visa.read_bytes(self.visa.bytes_in_buffer)
+        self.visa.write(f">{cmd}")
+        return self.visa.read()
 
     def _set_param_and_confirm(self, cmd_id: str, par_name: str, cmd_arg: str = ""):
         """Set a parameter and reads it back until both values match."""
-        sleep_before_read = 0.0
         timeout = 5
         t_start = time.time()
         cmd = f"{cmd_id}{cmd_arg}"
         while True:
-            self._clear_read_buffer()
             self._write_cmd(cmd)
-            time.sleep(sleep_before_read)
-            value = self.get_configuration(par_name)
-            if value == cmd_arg:
-                break
+            try:
+                value = self.get_configuration(par_name)
+                if value == cmd_arg:
+                    break
+            except TimeoutError:
+                # try again, sometimes the command is not received correctly by erasynth
+                pass
             if time.time() > t_start + timeout:
-                raise TimeoutError(f"Command {cmd!r} failed.")
-            # keep increasing the wait time
-            sleep_before_read += 5e-3
+                raise TimeoutError(f"Command {cmd!r} timeout in {timeout} s.")
+            print("failed")
 
-    def _readline(self):
-        return self.ser.readline().decode("ASCII").strip()
-
-    def _get_json_str(self, cmd: str, first_key: str):
+    def _get_json(self, cmd: str):
         """
         Sends command and reads result until the result looks like a JSON.
         """
-        while True:
-            self._clear_read_buffer()
-            self._write_cmd(cmd)
-            read_str = self._readline()
-            if (
-                read_str.startswith('{"' + first_key) and read_str[-1] == "}"
-            ):  # This way we ignore everything until we see the configuration JSON
-                break
-        return read_str
+        # self.ser.read_all() # clear buffer
+        read_str = self._write_cmd(cmd)
+        self.visa.read_bytes(self.visa.bytes_in_buffer)
+        # time.sleep(80e-3)
+        # read_str = ""
+        # t_start = time.time()
+        # timeout = 1000e-3
+        # # read until we receive the full json
+        # while '{"' not in read_str:
+        #     time.sleep(10e-3)
+        #     read_str += self.ser.read_all().decode("ASCII")
+        #     if time.time() > t_start + timeout:
+        #         print("failed json")
+        #         raise TimeoutError(f"JSON not received within {timeout} s.")
 
-    def _clear_read_buffer(self):
-        """
-        Clears the read buffer.
+        # while '"}\r' not in read_str:
+        #     time.sleep(10e-3)
+        #     read_str += self.ser.read_all().decode("ASCII")
 
-        Flushing the buffer does not always seem to work (see pySerial documentation).
-        Instead we just read until empty.
-        """
-        self.ser.read(self.ser.in_waiting)
+        # ERASynth print "random" debug messages, we discard them here
+        # json_str = "{" + read_str.split('{')[1].split("}")[-2] + "}"
+        print(read_str)
+        return json.loads(read_str)
 
     # ##################################################################################
     # get commands
@@ -985,7 +1010,7 @@ _SELF_TEST_LIST = [
     ("status", False),
     ("status", True),
     ("modulation_on_off", "on"),
-    ("modulation_on_off", "off"),
+    # ("modulation_on_off", "off"),
     ("modulation_signal_waveform", "triangle"),
     ("modulation_signal_waveform", "ramp"),
     ("modulation_signal_waveform", "square"),
